@@ -1,12 +1,15 @@
 # Deploying on Fly.io
 
+
+Fly.io maintains their own guide for Elixir/Phoenix here: [Fly.io/docs/elixir/getting-started/](https://fly.io/docs/elixir/getting-started/) we will keep this guide up but for the latest and greatest check with them!
+
 ## What we'll need
 
 The only thing we'll need for this guide is a working Phoenix application. For those of us who need a simple application to deploy, please follow the [Up and Running guide](https://hexdocs.pm/phoenix/up_and_running.html).
 
 You can just:
 
-```
+```console
 $ mix phx.new my_app
 ```
 
@@ -16,7 +19,7 @@ The main goal for this guide is to get a Phoenix application running on [Fly.io]
 
 ## Sections
 
-Let's separate this process into a few steps so we can keep track of where we are.
+Let's separate this process into a few steps, so we can keep track of where we are.
 
 - Install the Fly.io CLI
 - Sign up for Fly.io
@@ -30,13 +33,13 @@ Follow the instructions [here](https://fly.io/docs/getting-started/installing-fl
 
 ## Sign up for Fly.io
 
-We can [sign up for an account](https://fly.io/docs/getting-started/login-to-fly/) using the CLI.
+We can [sign up for an account](https://fly.io/docs/getting-started/log-in-to-fly/) using the CLI.
 
 ```console
 $ fly auth signup
 ```
 
-Or signin.
+Or sign in.
 
 ```console
 $ flyctl auth login
@@ -67,7 +70,7 @@ The `fly launch` command also created a `fly.toml` file for you. This is where y
 
 ### Storing secrets on Fly.io
 
-You may also have some secrets you'd like set on your app.
+You may also have some secrets you'd like to set on your app.
 
 Use [`fly secrets`](https://fly.io/docs/reference/secrets/#setting-secrets) to configure those.
 
@@ -83,7 +86,7 @@ When you want to deploy changes to your application, use `fly deploy`.
 $ fly deploy
 ```
 
-Note: On Apple Silicon (M1) computers, docker runs cross platform builds using qemu which might not always work. If you get a segmentation fault error like the following:
+Note: On Apple Silicon (M1) computers, docker runs cross-platform builds using qemu which might not always work. If you get a segmentation fault error like the following:
 
 ```
  => [build  7/17] RUN mix deps.get --only
@@ -125,8 +128,7 @@ There are a couple prerequisites, we first need to establish an [SSH Shell](http
 This step sets up a root certificate for your account and then issues a certificate.
 
 ```console
-$ fly ssh establish
-$ fly ssh issue
+$ fly ssh issue --agent
 ```
 
 With SSH configured, let's open a console.
@@ -208,18 +210,17 @@ Our next step is to add the `topologies` configuration to `config/runtime.exs`.
 
 This configures `libcluster` to use the `DNSPoll` strategy and look for other deployed apps using the `$FLY_APP_NAME` on the `.internal` private network.
 
-
 #### Controlling the name for our node
 
 We need to control the naming of our Elixir nodes. To help them connect up, we'll name them using this pattern: `your-fly-app-name@the.ipv6.address.on.fly`. To do this, we'll generate the release config.
 
-```
+```console
 $ mix release.init
 ```
 
 Then edit the generated `rel/env.sh.eex` file and add the following lines:
 
-```
+```console
 ip=$(grep fly-local-6pn /etc/hosts | cut -f 1)
 export RELEASE_DISTRIBUTION=name
 export RELEASE_NODE=$FLY_APP_NAME@$ip
@@ -227,7 +228,7 @@ export RELEASE_NODE=$FLY_APP_NAME@$ip
 
 After making the change, deploy your app!
 
-```
+```console
 $ fly deploy
 ```
 
@@ -259,7 +260,7 @@ $ fly scale count 2
 Count changed to 2
 ```
 
-Checking the status we can see what happened.
+Checking the status, we can see what happened.
 
 ```console
 $ fly status
@@ -284,8 +285,7 @@ app[eb4119d3] sea [info] 21:50:21.924 [info] [libcluster:fly6pn] connected to :"
 But that's not as rewarding as seeing it from inside a node. From an IEx shell, we can ask the node we're connected to, what other nodes it can see.
 
 ```console
-$ fly ssh console
-$ /app/bin/my_app remote
+$ fly ssh console -C "/app/bin/my_app remote"
 ```
 
 ```elixir
@@ -299,7 +299,7 @@ The IEx prompt is included to help show the IP address of the node we are connec
 
 Fly makes it easy to deploy instances closer to your users. Through the magic of DNS, users are directed to the nearest region where your application is located. You can read more about [Fly.io regions here](https://fly.io/docs/reference/regions/).
 
-Starting back from our baseline of a single instance running in `sea` which is Seattle, Washington (US), Let's add the region `ewr` which is Parsippany, NJ (US). This puts an instance on both coasts of the US.
+Starting back from our baseline of a single instance running in `sea` which is Seattle, Washington (US), let's add the region `ewr` which is Parsippany, NJ (US). This puts an instance on both coasts of the US.
 
 ```console
 $ fly regions add ewr
@@ -344,8 +344,7 @@ cdf6c422 30      sea    run     running 1 total, 1 passing 0        6m47s ago
 Let's ensure they are clustered together.
 
 ```console
-$ fly ssh console
-$ /app/bin/my_app remote
+$ fly ssh console -C "/app/bin/my_app remote"
 ```
 
 ```elixir

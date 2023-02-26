@@ -11,13 +11,17 @@ export default class LongPoll {
     this.endPoint = null
     this.token = null
     this.skipHeartbeat = true
+    this.reqs = new Set()
+    this.awaitingBatchAck = false
+    this.currentBatch = null
+    this.currentBatchTimer = null
+    this.batchBuffer = []
     this.onopen = function (){ } // noop
     this.onerror = function (){ } // noop
     this.onmessage = function (){ } // noop
     this.onclose = function (){ } // noop
     this.pollEndpoint = this.normalizeEndpoint(endPoint)
     this.readyState = SOCKET_STATES.connecting
-
     this.poll()
   }
 
@@ -42,10 +46,10 @@ export default class LongPoll {
     this.closeAndRetry(1005, "timeout", false)
   }
 
-  poll(){
-    if(!(this.readyState === SOCKET_STATES.open || this.readyState === SOCKET_STATES.connecting)){ return }
+  isActive(){ return this.readyState === SOCKET_STATES.open || this.readyState === SOCKET_STATES.connecting }
 
-    Ajax.request("GET", this.endpointURL(), "application/json", null, this.timeout, this.ontimeout.bind(this), (resp) => {
+  poll(){
+    this.ajax("GET", "application/json", null, () => this.ontimeout(), resp => {
       if(resp){
         var {status, token, messages} = resp
         this.token = token
@@ -73,10 +77,8 @@ export default class LongPoll {
             // next message event handler is run.
             //
             // In order to emulate this behaviour, we need to make sure each
-            // onmessage handler is run within it's own macrotask.
-            setTimeout(() => {
-              this.onmessage({data: msg})
-            }, 0)
+            // onmessage handler is run within its own macrotask.
+            setTimeout(() => this.onmessage({data: msg}), 0)
           })
           this.poll()
           break
@@ -102,22 +104,61 @@ export default class LongPoll {
     })
   }
 
+  // we collect all pushes within the current event loop by
+  // setTimeout 0, which optimizes back-to-back procedural
+  // pushes against an empty buffer
   send(body){
-    Ajax.request("POST", this.endpointURL(), "application/json", body, this.timeout, this.onerror.bind(this, "timeout"), (resp) => {
+    if(this.currentBatch){
+      this.currentBatch.push(body)
+    } else if(this.awaitingBatchAck){
+      this.batchBuffer.push(body)
+    } else {
+      this.currentBatch = [body]
+      this.currentBatchTimer = setTimeout(() => {
+        this.batchSend(this.currentBatch)
+        this.currentBatch = null
+      }, 0)
+    }
+  }
+
+  batchSend(messages){
+    this.awaitingBatchAck = true
+    this.ajax("POST", "application/x-ndjson", messages.join("\n"), () => this.onerror("timeout"), resp => {
+      this.awaitingBatchAck = false
       if(!resp || resp.status !== 200){
         this.onerror(resp && resp.status)
         this.closeAndRetry(1011, "internal server error", false)
+      } else if(this.batchBuffer.length > 0){
+        this.batchSend(this.batchBuffer)
+        this.batchBuffer = []
       }
     })
   }
 
   close(code, reason, wasClean){
+    for(let req of this.reqs){ req.abort() }
     this.readyState = SOCKET_STATES.closed
-    this.onclose(
-      new CloseEvent(
-        'close',
-        Object.assign({ code: 1000, reason: undefined, wasClean: true }, { code, reason, wasClean }),
-      ),
-    )
+    let opts = Object.assign({code: 1000, reason: undefined, wasClean: true}, {code, reason, wasClean})
+    this.batchBuffer = []
+    clearTimeout(this.currentBatchTimer)
+    this.currentBatchTimer = null
+    if(typeof(CloseEvent) !== "undefined"){
+      this.onclose(new CloseEvent("close", opts))
+    } else {
+      this.onclose(opts)
+    }
+  }
+
+  ajax(method, contentType, body, onCallerTimeout, callback){
+    let req
+    let ontimeout = () => {
+      this.reqs.delete(req)
+      onCallerTimeout()
+    }
+    req = Ajax.request(method, this.endpointURL(), contentType, body, this.timeout, ontimeout, resp => {
+      this.reqs.delete(req)
+      if(this.isActive()){ callback(resp) }
+    })
+    this.reqs.add(req)
   }
 }
